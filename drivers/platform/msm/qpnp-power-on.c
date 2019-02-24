@@ -25,6 +25,10 @@
 #include <linux/log2.h>
 #include <linux/qpnp/power-on.h>
 
+#ifdef CONFIG_LGE_PM_PWR_KEY_FOR_CHG_LOGO
+#include <mach/board_lge.h>
+#endif
+
 #define PMIC_VER_8941           0x01
 #define PMIC_VERSION_REG        0x0105
 #define PMIC_VERSION_REV4_REG   0x0103
@@ -491,6 +495,11 @@ qpnp_get_cfg(struct qpnp_pon *pon, u32 pon_type)
 	return NULL;
 }
 
+#ifdef CONFIG_LGE_PM_PWR_KEY_FOR_CHG_LOGO
+void qpnp_pwr_key_action_set_for_chg_logo(struct input_dev *dev, unsigned int code, int value);
+#endif
+
+
 static int
 qpnp_pon_input_dispatch(struct qpnp_pon *pon, u32 pon_type)
 {
@@ -543,10 +552,23 @@ qpnp_pon_input_dispatch(struct qpnp_pon *pon, u32 pon_type)
 		input_report_key(pon->pon_input, cfg->key_code, 1);
 		input_sync(pon->pon_input);
 	}
-
+#ifdef CONFIG_LGE_PM_PWR_KEY_FOR_CHG_LOGO
+    if(lge_get_boot_mode() == LGE_BOOT_MODE_CHARGERLOGO)
+    {
+        pr_info("=========== [CHG LOGO MODE] ===========\n");
+	    qpnp_pwr_key_action_set_for_chg_logo(pon->pon_input, cfg->key_code,
+					(pon_rt_sts & pon_rt_bit));
+    }
+	else
+	{
+	    input_report_key(pon->pon_input, cfg->key_code,
+					(pon_rt_sts & pon_rt_bit));
+	    input_sync(pon->pon_input);
+	}
+#else
 	input_report_key(pon->pon_input, cfg->key_code, key_status);
 	input_sync(pon->pon_input);
-
+#endif
 	cfg->old_state = !!key_status;
 
 	return 0;
@@ -955,6 +977,9 @@ static int qpnp_pon_config_init(struct qpnp_pon *pon)
 	int rc = 0, i = 0, pmic_wd_bark_irq;
 	struct device_node *pp = NULL;
 	struct qpnp_pon_config *cfg;
+#ifdef CONFIG_MACH_LGE
+	int disable = 0;
+#endif
 	u8 pon_ver;
 	u8 pmic_type;
 	u8 revid_rev4;
@@ -1444,10 +1469,20 @@ static int qpnp_pon_probe(struct spmi_device *spmi)
 	}
 
 	pon->spmi = spmi;
-
+	
+#ifdef CONFIG_MACH_LGE
+	/* get the total number of pon configurations */
+	while ((itr = of_get_next_child(spmi->dev.of_node, itr))) {
+		rc = of_property_read_u32(itr, "qcom,disable", &disable);
+		if (rc || disable == 0)
+			pon->num_pon_config++;
+	}
+	pr_debug("%s: num_pon_config %d\n", __func__, pon->num_pon_config);
+#else
 	/* get the total number of pon configurations */
 	while ((itr = of_get_next_child(spmi->dev.of_node, itr)))
 		pon->num_pon_config++;
+#endif
 
 	if (!pon->num_pon_config) {
 		/* No PON config., do not register the driver */
@@ -1472,7 +1507,16 @@ static int qpnp_pon_probe(struct spmi_device *spmi)
 			"Unable to store/clear WARM_RESET_REASONx registers\n");
 		return rc;
 	}
-
+/*                                                                         */
+#if defined(CONFIG_ARCH_MSM8610) //W3,W5 model
+ /* Enable SMPL */ 
+   { 
+    unsigned char d = 0x80; 
+    spmi_ext_register_writel(pon->spmi->ctrl, pon->spmi->sid, 0x5A48, &d, 1); 
+    qpnp_pon_trigger_config(PON_SMPL,1); 
+   } 
+#endif
+/* 
 	/* PON reason */
 	rc = spmi_ext_register_readl(pon->spmi->ctrl, pon->spmi->sid,
 				QPNP_PON_REASON1(pon->base), &pon_sts, 1);

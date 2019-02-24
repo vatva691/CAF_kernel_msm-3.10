@@ -37,7 +37,11 @@ obj-$(CONFIG_ARCH_MSM8909) += board-8909.o
 obj-$(CONFIG_ARCH_MSM8916) += board-8916.o
 obj-$(CONFIG_ARCH_MSM8226) += board-8226.o board-8226-gpiomux.o
 obj-$(CONFIG_ARCH_MSM8226) += clock-8226.o clock-mdss-8974.o
-obj-$(CONFIG_ARCH_MSM8610) += board-8610.o board-8610-gpiomux.o
+ifdef CONFIG_MACH_LGE
+obj-$(CONFIG_ARCH_MSM8610) += lge/
+else
+ obj-$(CONFIG_ARCH_MSM8610) += board-8610.o board-8610-gpiomux.o
+endif
 obj-$(CONFIG_ARCH_MSM8610) += clock-8610.o
 obj-$(CONFIG_ARCH_MSM8610) += clock-dsi-8610.o
 obj-$(CONFIG_ARCH_MDM9630) += clock-9630.o
