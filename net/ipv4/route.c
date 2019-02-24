@@ -2157,9 +2157,10 @@ static int __mkroute_input(struct sk_buff *skb,
 		flags |= RTCF_DIRECTSRC;
 
 	if (out_dev == in_dev && err &&
+	    skb->protocol == htons(ETH_P_IP) &&
 	    (IN_DEV_SHARED_MEDIA(out_dev) ||
 	     inet_addr_onlink(out_dev, saddr, FIB_RES_GW(*res))))
-		flags |= RTCF_DOREDIRECT;
+		IPCB(skb)->flags |= IPSKB_DOREDIRECT;
 
 	if (skb->protocol != htons(ETH_P_IP)) {
 		/* Not IP (i.e. ARP). Do not create route, if it is
@@ -2800,6 +2801,13 @@ static struct rtable *ip_route_output_slow(struct net *net, struct flowi4 *fl4)
 		fl4->saddr = FIB_RES_PREFSRC(net, res);
 
 	dev_out = FIB_RES_DEV(res);
+/* 2012-06-16 jewon.lee@lge.com LGP_DATA_KERNEL_BUGFIX_ROUTE [START] */
+    if (dev_out == NULL) {
+        printk(KERN_DEBUG "dev_out is null\n");
+        rth = ERR_PTR(-ENETUNREACH);
+        goto out;
+    }
+/* 2012-06-16 jewon.lee@lge.com LGP_DATA_KERNEL_BUGFIX_ROUTE [END] */
 	fl4->flowi4_oif = dev_out->ifindex;
 
 
@@ -2988,6 +2996,8 @@ static int rt_fill_info(struct net *net,
 	r->rtm_flags	= (rt->rt_flags & ~0xFFFF) | RTM_F_CLONED;
 	if (rt->rt_flags & RTCF_NOTIFY)
 		r->rtm_flags |= RTM_F_NOTIFY;
+	if (IPCB(skb)->flags & IPSKB_DOREDIRECT)
+		r->rtm_flags |= RTCF_DOREDIRECT;
 
 	NLA_PUT_BE32(skb, RTA_DST, rt->rt_dst);
 

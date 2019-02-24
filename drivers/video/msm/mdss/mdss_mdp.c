@@ -49,7 +49,6 @@
 #include <mach/memory.h>
 #include <mach/msm_memtypes.h>
 #include <mach/rpm-regulator-smd.h>
-#include <mach/scm.h>
 
 #include "mdss.h"
 #include "mdss_fb.h"
@@ -81,8 +80,6 @@ struct msm_mdp_interface mdp5 = {
 
 #define IB_QUOTA 800000000
 #define AB_QUOTA 800000000
-
-#define MEM_PROTECT_SD_CTRL 0xF
 
 static DEFINE_SPINLOCK(mdp_lock);
 static DEFINE_MUTEX(mdp_clk_lock);
@@ -220,7 +217,7 @@ int mdss_register_irq(struct mdss_hw *hw)
 	if (!mdss_irq_handlers[hw->hw_ndx])
 		mdss_irq_handlers[hw->hw_ndx] = hw;
 	else
-		pr_err("panel %d's irq at %p is already registered\n",
+		pr_err("panel %d's irq at %pK is already registered\n",
 			hw->hw_ndx, hw->irq_handler);
 	spin_unlock_irqrestore(&mdss_lock, irq_flags);
 
@@ -1110,7 +1107,7 @@ static u32 mdss_mdp_res_init(struct mdss_data_type *mdata)
 
 	mdata->iclient = msm_ion_client_create(-1, mdata->pdev->name);
 	if (IS_ERR_OR_NULL(mdata->iclient)) {
-		pr_err("msm_ion_client_create() return error (%p)\n",
+		pr_err("msm_ion_client_create() return error (%pK)\n",
 				mdata->iclient);
 		mdata->iclient = NULL;
 	}
@@ -1187,8 +1184,68 @@ static ssize_t mdss_mdp_show_capabilities(struct device *dev,
 
 static DEVICE_ATTR(caps, S_IRUGO, mdss_mdp_show_capabilities, NULL);
 
+#ifdef CONFIG_LGE_VSYNC_SKIP
+static ssize_t fps_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	ulong fps;
+
+	if (!count)
+		return -EINVAL;
+
+	fps = simple_strtoul(buf, NULL, 10);
+
+	if (fps == 0 || fps >= 60) {
+		mdss_res->enable_skip_vsync = 0;
+		mdss_res->skip_value = 0;
+		mdss_res->weight = 0;
+		mdss_res->bucket = 0;
+		mdss_res->skip_count = 0;
+		mdss_res->skip_ratio = 60;
+		mdss_res->skip_first = false;
+		pr_info("Disable frame skip.\n");
+	} else {
+		mdss_res->enable_skip_vsync = 1;
+		mdss_res->skip_value = (60<<16)/fps;
+		mdss_res->weight = (1<<16);
+		mdss_res->bucket = 0;
+		mdss_res->skip_ratio = fps;
+		mdss_res->skip_first = false;
+		pr_info("Enable frame skip: Set to %lu fps.\n", fps);
+	}
+	return count;
+}
+
+static ssize_t fps_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	int r = 0;
+	r = snprintf(buf, PAGE_SIZE, "enable_skip_vsync=%d\nweight=%lu\nskip_value=%lu\nbucket=%lu\nskip_count=%lu\n",
+		mdss_res->enable_skip_vsync,
+		mdss_res->weight,
+		mdss_res->skip_value,
+		mdss_res->bucket,
+		mdss_res->skip_count);
+	return r;
+}
+
+static ssize_t fps_ratio_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	int r = 0;
+	r = snprintf(buf, PAGE_SIZE, "%d 60\n", mdss_res->skip_ratio);
+	return r;
+}
+
+static DEVICE_ATTR(vfps, S_IRUGO | S_IWUSR, fps_show, fps_store);
+static DEVICE_ATTR(vfps_ratio, 0644, fps_ratio_show, NULL);
+#endif
 static struct attribute *mdp_fs_attrs[] = {
 	&dev_attr_caps.attr,
+#ifdef CONFIG_LGE_VSYNC_SKIP
+	&dev_attr_vfps.attr,
+	&dev_attr_vfps_ratio.attr,
+#endif
 	NULL
 };
 
@@ -1231,7 +1288,6 @@ static int mdss_mdp_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, mdata);
 	mdss_res = mdata;
 	mutex_init(&mdata->reg_lock);
-	atomic_set(&mdata->sd_client_count, 0);
 
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "mdp_phys");
 	if (!res) {
@@ -1522,7 +1578,7 @@ static int mdss_mdp_parse_bootarg(struct platform_device *pdev)
 	cmd_len = strlen(cmd_line);
 	disp_idx = strnstr(cmd_line, "mdss_mdp.panel=", cmd_len);
 	if (!disp_idx) {
-		pr_err("%s:%d:cmdline panel not set disp_idx=[%p]\n",
+		pr_err("%s:%d:cmdline panel not set disp_idx=[%pK]\n",
 				__func__, __LINE__, disp_idx);
 		memset(panel_name, 0x00, MDSS_MAX_PANEL_LEN);
 		*intf_type = MDSS_PANEL_INTF_INVALID;
@@ -1542,7 +1598,7 @@ static int mdss_mdp_parse_bootarg(struct platform_device *pdev)
 	}
 
 	if (end_idx <= disp_idx) {
-		pr_err("%s:%d:cmdline pan incorrect end=[%p] disp=[%p]\n",
+		pr_err("%s:%d:cmdline pan incorrect end=[%pK] disp=[%pK]\n",
 			__func__, __LINE__, end_idx, disp_idx);
 		memset(panel_name, 0x00, MDSS_MAX_PANEL_LEN);
 		*intf_type = MDSS_PANEL_INTF_INVALID;
@@ -2638,26 +2694,6 @@ int mdss_mdp_footswitch_ctrl_ulps(int on, struct device *dev)
 	}
 
 	return 0;
-}
-
-int mdss_mdp_secure_display_ctrl(unsigned int enable)
-{
-	struct sd_ctrl_req {
-		unsigned int enable;
-	} __attribute__ ((__packed__)) request;
-	unsigned int resp = -1;
-	int ret = 0;
-
-	request.enable = enable;
-
-	ret = scm_call(SCM_SVC_MP, MEM_PROTECT_SD_CTRL,
-		&request, sizeof(request), &resp, sizeof(resp));
-	pr_debug("scm_call MEM_PROTECT_SD_CTRL(%u): ret=%d, resp=%x",
-				enable, ret, resp);
-	if (ret)
-		return ret;
-
-	return resp;
 }
 
 static inline int mdss_mdp_suspend_sub(struct mdss_data_type *mdata)

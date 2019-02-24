@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -102,6 +102,8 @@ static int msm_watchdog_suspend(struct device *dev)
 	__raw_writel(1, wdog_dd->base + WDT0_RST);
 	__raw_writel(0, wdog_dd->base + WDT0_EN);
 	mb();
+
+	pr_err("MSM Apps Watchdog suspended.\n");
 	return 0;
 }
 
@@ -114,6 +116,8 @@ static int msm_watchdog_resume(struct device *dev)
 	__raw_writel(1, wdog_dd->base + WDT0_EN);
 	__raw_writel(1, wdog_dd->base + WDT0_RST);
 	mb();
+
+	pr_err("MSM Apps Watchdog resumed.\n");
 	return 0;
 }
 
@@ -153,7 +157,7 @@ static void wdog_disable(struct msm_watchdog_data *wdog_dd)
 	/* may be suspended after the first write above */
 	__raw_writel(0, wdog_dd->base + WDT0_EN);
 	mb();
-	pr_info("MSM Apps Watchdog deactivated.\n");
+	pr_err("MSM Apps Watchdog deactivated.\n");
 }
 
 struct wdog_disable_work_data {
@@ -199,7 +203,7 @@ static ssize_t wdog_disable_set(struct device *dev,
 	if (disable == 1) {
 		mutex_lock(&wdog_dd->disable_lock);
 		if (enable == 0) {
-			pr_info("MSM Apps Watchdog already disabled\n");
+			pr_err("MSM Apps Watchdog already disabled\n");
 			mutex_unlock(&wdog_dd->disable_lock);
 			return count;
 		}
@@ -281,6 +285,12 @@ static void pet_watchdog_work(struct work_struct *work)
 	struct msm_watchdog_data *wdog_dd = container_of(delayed_work,
 						struct msm_watchdog_data,
 							dogwork_struct);
+
+	if (test_taint(TAINT_DIE) || oops_in_progress) {
+		pr_info("MSM Watchdog Skip Pet Work.\n");
+		return;
+	}
+
 	delay_time = msecs_to_jiffies(wdog_dd->pet_time);
 	if (enable) {
 		if (wdog_dd->do_ipi_ping)
@@ -464,7 +474,7 @@ static void __devinit dump_pdata(struct msm_watchdog_data *pdata)
 	dev_dbg(pdata->dev, "wdog bark_time %d", pdata->bark_time);
 	dev_dbg(pdata->dev, "wdog pet_time %d", pdata->pet_time);
 	dev_dbg(pdata->dev, "wdog perform ipi ping %d", pdata->do_ipi_ping);
-	dev_dbg(pdata->dev, "wdog base address is 0x%x\n", (unsigned int)
+	dev_dbg(pdata->dev, "wdog base address is 0x%lx\n", (unsigned long)
 								pdata->base);
 }
 
@@ -476,6 +486,8 @@ static int __devinit msm_wdog_dt_to_pdata(struct platform_device *pdev,
 	int ret;
 
 	wdog_resource = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	if (!wdog_resource)
+		return -ENODEV;
 	pdata->size = resource_size(wdog_resource);
 	pdata->phys_base = wdog_resource->start;
 	if (unlikely(!(devm_request_mem_region(&pdev->dev, pdata->phys_base,

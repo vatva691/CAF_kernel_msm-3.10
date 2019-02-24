@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -20,10 +20,14 @@
 #include <linux/module.h>
 #include <linux/uaccess.h>
 #include <linux/delay.h>
+#if defined(CONFIG_MACH_MSM8X10_L70P)
+#include <linux/gpio.h>
+#endif
 
 #include "mdp3_ctrl.h"
 #include "mdp3.h"
 #include "mdp3_ppp.h"
+
 
 #define VSYNC_EXPIRE_TICK	4
 
@@ -348,12 +352,17 @@ static int mdp3_ctrl_res_req_bus(struct msm_fb_data_type *mfd, int status)
 {
 	int rc = 0;
 	if (status) {
+#if defined(CONFIG_MACH_MSM8X10_L70P)
+		int ab = 0x7FFFFFFF;
+		int ib = 0x7FFFFFFF;
+#else
 		struct mdss_panel_info *panel_info = mfd->panel_info;
 		u64 ab = 0;
 		u64 ib = 0;
 		ab = panel_info->xres * panel_info->yres * 4;
 		ab *= panel_info->mipi.frame_rate;
-		ib = (ab * 3) / 2;
+		ib = (ab * 5) / 2;
+#endif
 		rc = mdp3_bus_scale_set_quota(MDP3_CLIENT_DMA_P, ab, ib);
 	} else {
 		rc = mdp3_bus_scale_set_quota(MDP3_CLIENT_DMA_P, 0, 0);
@@ -571,7 +580,7 @@ static int mdp3_ctrl_on(struct msm_fb_data_type *mfd)
 	struct mdp3_session_data *mdp3_session;
 	struct mdss_panel_data *panel;
 
-	pr_debug("mdp3_ctrl_on\n");
+	pr_info("mdp3_ctrl_on++\n");
 	mdp3_session = (struct mdp3_session_data *)mfd->mdp.private1;
 	if (!mdp3_session || !mdp3_session->panel || !mdp3_session->dma ||
 		!mdp3_session->intf) {
@@ -649,7 +658,7 @@ static int mdp3_ctrl_off(struct msm_fb_data_type *mfd)
 	struct mdp3_session_data *mdp3_session;
 	struct mdss_panel_data *panel;
 
-	pr_debug("mdp3_ctrl_off\n");
+	pr_info("mdp3_ctrl_off++\n");
 	mdp3_session = (struct mdp3_session_data *)mfd->mdp.private1;
 	if (!mdp3_session || !mdp3_session->panel || !mdp3_session->dma ||
 		!mdp3_session->intf) {
@@ -670,19 +679,26 @@ static int mdp3_ctrl_off(struct msm_fb_data_type *mfd)
 
 	mdp3_ctrl_clk_enable(mfd, 1);
 
-	mdp3_histogram_stop(mdp3_session, MDP_BLOCK_DMA_P);
-
+#if defined(CONFIG_MACH_MSM8X10_L70P)
 	if (panel->event_handler)
 		rc = panel->event_handler(panel, MDSS_EVENT_PANEL_OFF, NULL);
 	if (rc)
 		pr_err("fail to turn off the panel\n");
+#endif
+
+	mdp3_histogram_stop(mdp3_session, MDP_BLOCK_DMA_P);
+
+#if !defined(CONFIG_MACH_MSM8X10_L70P)
+	if (panel->event_handler)
+		rc = panel->event_handler(panel, MDSS_EVENT_PANEL_OFF, NULL);
+	if (rc)
+		pr_err("fail to turn off the panel\n");
+#endif
 
 	rc = mdp3_session->dma->stop(mdp3_session->dma, mdp3_session->intf);
 	if (rc)
 		pr_debug("fail to stop the MDP3 dma\n");
 	msleep(20);
-
-	mfd->panel_info->cont_splash_enabled = 0;
 
 	mdp3_irq_deregister();
 
@@ -762,7 +778,6 @@ static int mdp3_ctrl_reset_cmd(struct msm_fb_data_type *mfd)
 		mdp3_dma->vsync_enable(mdp3_dma, &vsync_client);
 
 	mdp3_session->first_commit = true;
-	mfd->panel_info->cont_splash_enabled = 0;
 	mdp3_session->in_splash_screen = 0;
 
 reset_error:
@@ -851,8 +866,15 @@ static int mdp3_ctrl_reset(struct msm_fb_data_type *mfd)
 	if (vsync_client.handler)
 		mdp3_dma->vsync_enable(mdp3_dma, &vsync_client);
 
+#if defined(CONFIG_MACH_MSM8X10_L70P)
+	if (mfd->panel_power_on) {
+		printk(KERN_INFO"[%s][%d][touch] mdp reset ======", __func__, __LINE__);
+		gpio_set_value(0, 0);
+		mdelay(200);
+		gpio_set_value(0, 1);
+	}
+#endif
 	mdp3_session->first_commit = true;
-	mfd->panel_info->cont_splash_enabled = 0;
 	mdp3_session->in_splash_screen = 0;
 
 reset_error:
@@ -878,6 +900,15 @@ static int mdp3_overlay_get(struct msm_fb_data_type *mfd,
 	return rc;
 }
 
+#if defined (CONFIG_MACH_MSM8X10_W5) || defined (CONFIG_MACH_MSM8X10_W6) || defined (CONFIG_MACH_MSM8X10_L70P)
+/* At booting up, Between LG Logo and Operation Animation showing, abnormal LG Logo is appearing one time.
+Because LG Logo image format is RGB888, Android side image format is RGBA8888, both Image formats are mismatched.
+So, We add the code to change MDP_RGBA_8888 to MDP_RGB_888 when is_done_drawing_logo is not "1".
+is_done_drawing_logo is set to 1 at mdss_dsi_panel_off.
+*/
+extern char is_done_drawing_logo;
+#endif
+
 static int mdp3_overlay_set(struct msm_fb_data_type *mfd,
 				struct mdp_overlay *req)
 {
@@ -890,6 +921,18 @@ static int mdp3_overlay_set(struct msm_fb_data_type *mfd,
 	int format;
 
 	fix = &fbi->fix;
+
+#if defined (CONFIG_MACH_MSM8X10_W5) || defined (CONFIG_MACH_MSM8X10_W6) || defined (CONFIG_MACH_MSM8X10_L70P)
+/* At booting up, Between LG Logo and Operation Animation showing, abnormal LG Logo is appearing one time.
+Because LG Logo image format is RGB888, Android side image format is RGBA8888, both Image formats are mismatched.
+So, We add the code to change MDP_RGBA_8888 to MDP_RGB_888 when is_done_drawing_logo is not "1".
+is_done_drawing_logo is set to 1 at mdss_dsi_panel_off.
+*/
+	if (!is_done_drawing_logo) {
+		req->src.format = MDP_RGB_888;
+	}
+#endif
+
 	stride = req->src.width * ppp_bpp(req->src.format);
 	format = mdp3_ctrl_get_source_format(req->src.format);
 
@@ -1066,8 +1109,12 @@ static int mdp3_ctrl_display_commit_kickoff(struct msm_fb_data_type *mfd,
 	}
 
 	mdp3_session->vsync_before_commit = 0;
-	if (reset_done && (panel && panel->set_backlight))
+	if (reset_done && (panel && panel->set_backlight)) {
+#if defined(CONFIG_FB_MSM_MIPI_TIANMA_CMD_HVGA_PT) || defined(CONFIG_MACH_MSM8X10_L70P)
+		msleep(1);
+#endif
 		panel->set_backlight(panel, panel->panel_info.bl_max);
+	}
 
 	mutex_unlock(&mdp3_session->lock);
 
@@ -1085,6 +1132,11 @@ static void mdp3_ctrl_pan_display(struct msm_fb_data_type *mfd)
 	struct mdss_panel_info *panel_info;
 	int rc;
 
+#if defined(CONFIG_FB_MSM_MIPI_TIANMA_CMD_HVGA_PT) || defined(CONFIG_MACH_MSM8X10_W5) || defined(CONFIG_MACH_MSM8X10_W6) || defined(CONFIG_MACH_MSM8X10_L70P)
+	bool reset_done = false;
+	struct mdss_panel_data *panel;
+#endif
+
 	pr_debug("mdp3_ctrl_pan_display\n");
 	if (!mfd || !mfd->mdp.private1)
 		return;
@@ -1094,12 +1146,18 @@ static void mdp3_ctrl_pan_display(struct msm_fb_data_type *mfd)
 	if (!mdp3_session || !mdp3_session->dma)
 		return;
 
+#if defined(CONFIG_FB_MSM_MIPI_TIANMA_CMD_HVGA_PT) || defined(CONFIG_MACH_MSM8X10_W5) || defined(CONFIG_MACH_MSM8X10_W6) || defined(CONFIG_MACH_MSM8X10_L70P)
+	panel = mdp3_session->panel;
+#endif
 	if (mdp3_session->in_splash_screen) {
 		pr_debug("continuous splash screen, IOMMU not attached\n");
 		rc = mdp3_ctrl_reset(mfd);
 		if (rc) {
 			pr_err("fail to reset display\n");
 			return;
+#if defined(CONFIG_FB_MSM_MIPI_TIANMA_CMD_HVGA_PT) || defined(CONFIG_MACH_MSM8X10_W5) || defined(CONFIG_MACH_MSM8X10_W6) || defined(CONFIG_MACH_MSM8X10_L70P)
+		reset_done = true;
+#endif
 		}
 	}
 
@@ -1155,6 +1213,12 @@ static void mdp3_ctrl_pan_display(struct msm_fb_data_type *mfd)
 		msleep(1000 / panel_info->mipi.frame_rate);
 		mdp3_session->first_commit = false;
 	}
+
+#if defined(CONFIG_FB_MSM_MIPI_TIANMA_CMD_HVGA_PT) || defined(CONFIG_MACH_MSM8X10_W5) || defined(CONFIG_MACH_MSM8X10_W6) || defined(CONFIG_MACH_MSM8X10_L70P)
+	if (reset_done && (panel && panel->set_backlight)) {
+		panel->set_backlight(panel, panel->panel_info.bl_max);
+    }
+#endif
 
 	mdp3_session->vsync_before_commit = 0;
 
@@ -1560,8 +1624,13 @@ static int mdp3_histo_ioctl(struct msm_fb_data_type *mfd, u32 cmd,
 	return ret;
 }
 
+#ifdef CONFIG_LCD_KCAL
+static int mdp3_ctrl_lut_update(struct msm_fb_data_type *mfd,
+				struct fb_cmap *cmap, bool setup_hw)
+#else
 static int mdp3_ctrl_lut_update(struct msm_fb_data_type *mfd,
 				struct fb_cmap *cmap)
+#endif
 {
 	int rc = 0;
 	struct mdp3_session_data *mdp3_session = mfd->mdp.private1;
@@ -1580,6 +1649,9 @@ static int mdp3_ctrl_lut_update(struct msm_fb_data_type *mfd,
 		return  -EINVAL;
 	}
 
+#ifdef CONFIG_LCD_KCAL
+	if (setup_hw) {
+#endif
 	rc = copy_from_user(r + cmap->start,
 					cmap->red, sizeof(u16)*cmap->len);
 	rc |= copy_from_user(g + cmap->start,
@@ -1588,15 +1660,30 @@ static int mdp3_ctrl_lut_update(struct msm_fb_data_type *mfd,
 					cmap->blue, sizeof(u16)*cmap->len);
 	if (rc)
 		return rc;
+#ifdef CONFIG_LCD_KCAL
+       }
+#endif
 
 	lut_config.lut_enable = 7;
 	lut_config.lut_sel = mdp3_session->lut_sel;
 	lut_config.lut_position = 0;
 	lut_config.lut_dirty = true;
 	/* In HW the order is color0 = g, color1 = r and color2 = b*/
+#ifdef CONFIG_LCD_KCAL
+       if (setup_hw) {
+#endif
 	lut.color0_lut = g;
 	lut.color1_lut = r;
 	lut.color2_lut = b;
+
+#ifdef CONFIG_LCD_KCAL
+       } else {
+               lut.color0_lut = cmap->red;
+               lut.color1_lut = cmap->green;
+               lut.color2_lut = cmap->blue;
+       }
+#endif
+
 
 	mutex_lock(&mdp3_session->lock);
 
@@ -1617,6 +1704,7 @@ static int mdp3_ctrl_lut_update(struct msm_fb_data_type *mfd,
 
 	mutex_unlock(&mdp3_session->lock);
 	return rc;
+
 }
 
 static int mdp3_overlay_prepare(struct msm_fb_data_type *mfd,
@@ -1659,6 +1747,170 @@ static int mdp3_overlay_prepare(struct msm_fb_data_type *mfd,
 
 	return rc;
 }
+
+#ifdef CONFIG_LCD_KCAL
+static int update_preset_lcdc_lut(struct msm_fb_data_type *mfd,
+				bool setup_hw, int red, int green, int blue)
+{
+	struct fb_cmap cmap;
+	int ret = 0;
+
+	cmap.start = 0;
+	cmap.len = 256;
+	cmap.transp = NULL;
+
+	cmap.red = (uint16_t *)&(red);
+	cmap.green = (uint16_t *)&(green);
+	cmap.blue = (uint16_t *)&(blue);
+
+	ret = mdp3_ctrl_lut_update(mfd, &cmap, setup_hw);
+	if (ret)
+		pr_err("%s: failed to set lut! %d\n", __func__, ret);
+
+	return ret;
+}
+
+struct kcal_data {
+	int r;
+	int g;
+	int b;
+	int min;
+};
+
+static struct kcal_data lut = {255, 255, 255, 35};
+
+static int kcal_set_values(struct msm_fb_data_type *mfd,
+				int kcal_r, int kcal_g, int kcal_b)
+{
+	lut.r = kcal_r < lut.min ? lut.min : kcal_r;
+	lut.g = kcal_g < lut.min ? lut.min : kcal_g;
+	lut.b = kcal_b < lut.min ? lut.min : kcal_b;
+
+	if (kcal_r < lut.min || kcal_g < lut.min || kcal_b < lut.min)
+		update_preset_lcdc_lut(mfd, false, lut.r, lut.g, lut.b);
+
+	return 0;
+}
+
+static int kcal_get_values(int *kcal_r, int *kcal_g, int *kcal_b)
+{
+	*kcal_r = lut.r;
+	*kcal_g = lut.g;
+	*kcal_b = lut.b;
+	return 0;
+}
+
+static int kcal_set_min(struct msm_fb_data_type *mfd, int kcal_min)
+{
+	lut.min = kcal_min;
+
+	if (lut.min > lut.r || lut.min > lut.g || lut.min > lut.b) {
+		lut.r = lut.r < lut.min ? lut.min : lut.r;
+		lut.g = lut.g < lut.min ? lut.min : lut.g;
+		lut.b = lut.b < lut.min ? lut.min : lut.b;
+		update_preset_lcdc_lut(mfd, false, lut.r, lut.g, lut.b);
+	}
+
+	return 0;
+}
+
+static int kcal_get_min(int *kcal_min)
+{
+	*kcal_min = lut.min;
+	return 0;
+}
+
+static int kcal_refresh_display(struct msm_fb_data_type *mfd)
+{
+	return update_preset_lcdc_lut(mfd, false, lut.r, lut.g, lut.b);
+}
+
+static ssize_t kcal_store(struct device *dev, struct device_attribute *attr,
+				const char *buf, size_t count)
+{
+	struct fb_info *fbi = dev_get_drvdata(dev);
+	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)fbi->par;
+
+	int kcal_r = 0;
+	int kcal_g = 0;
+	int kcal_b = 0;
+
+	if (!count)
+		return -EINVAL;
+
+	sscanf(buf, "%d %d %d", &kcal_r, &kcal_g, &kcal_b);
+
+	if (kcal_r < 0 || kcal_r > 255)
+		return -EINVAL;
+
+	if (kcal_g < 0 || kcal_g > 255)
+		return -EINVAL;
+
+	if (kcal_b < 0 || kcal_b > 255)
+		return -EINVAL;
+
+	kcal_set_values(mfd, kcal_r, kcal_g, kcal_b);
+	kcal_refresh_display(mfd);
+
+	return count;
+}
+
+static ssize_t kcal_show(struct device *dev, struct device_attribute *attr,
+				char *buf)
+{
+	int kcal_r = 0;
+	int kcal_g = 0;
+	int kcal_b = 0;
+
+	kcal_get_values(&kcal_r, &kcal_g, &kcal_b);
+
+	return sprintf(buf, "%d %d %d\n", kcal_r, kcal_g, kcal_b);
+}
+
+static ssize_t kcal_min_store(struct device *dev, struct device_attribute *attr,
+				const char *buf, size_t count)
+{
+	struct fb_info *fbi = dev_get_drvdata(dev);
+	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)fbi->par;
+
+	int kcal_min = 0;
+
+	if (!count)
+		return -EINVAL;
+
+	sscanf(buf, "%d", &kcal_min);
+
+	if (kcal_min < 0 || kcal_min > 255)
+		return -EINVAL;
+
+	kcal_set_min(mfd, kcal_min);
+	kcal_refresh_display(mfd);
+
+	return count;
+}
+
+static ssize_t kcal_min_show(struct device *dev, struct device_attribute *attr,
+				char *buf)
+{
+	int kcal_min = 0;
+
+	kcal_get_min(&kcal_min);
+	return sprintf(buf, "%d\n", kcal_min);
+}
+
+static DEVICE_ATTR(kcal, 0644, kcal_show, kcal_store);
+static DEVICE_ATTR(kcal_min, 0644, kcal_min_show, kcal_min_store);
+
+static struct attribute *kcal_fs_attrs[] = {
+	&dev_attr_kcal.attr,
+	&dev_attr_kcal_min.attr,
+	NULL,
+};
+
+static struct attribute_group kcal_fs_attr_group = {
+	.attrs = kcal_fs_attrs,
+};
+#endif
 
 static int mdp3_ctrl_ioctl_handler(struct msm_fb_data_type *mfd,
 					u32 cmd, void __user *argp)
@@ -1927,6 +2179,14 @@ int mdp3_ctrl_init(struct msm_fb_data_type *mfd)
 	kobject_uevent(&dev->kobj, KOBJ_ADD);
 	pr_debug("vsync kobject_uevent(KOBJ_ADD)\n");
 
+#ifdef CONFIG_LCD_KCAL
+	rc = sysfs_create_group(&dev->kobj, &kcal_fs_attr_group);
+	if (rc) {
+		pr_err("kcal sysfs group creation failed, ret=%d\n", rc);
+		goto init_done;
+	}
+#endif
+
 	if (mdp3_get_cont_spash_en()) {
 		mdp3_session->clk_on = 1;
 		mdp3_session->in_splash_screen = 1;
@@ -1940,6 +2200,9 @@ int mdp3_ctrl_init(struct msm_fb_data_type *mfd)
 	}
 
 	mdp3_session->vsync_before_commit = true;
+#ifdef CONFIG_LCD_KCAL
+	update_preset_lcdc_lut(mfd, true, 255, 255, 255);
+#endif
 init_done:
 	if (IS_ERR_VALUE(rc))
 		kfree(mdp3_session);

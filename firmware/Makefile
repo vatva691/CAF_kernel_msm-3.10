@@ -20,6 +20,10 @@ fw-external-y := $(subst ",,$(CONFIG_EXTRA_FIRMWARE))
 # accurate. In the latter case it doesn't matter -- it'll use $(fw-shipped-all).
 # But be aware that the config file might not be included at all.
 
+touch_fw_list := $(subst .ihex, , $(notdir $(wildcard $(srctree)/firmware/atmel/*.ihex)))
+touch_fw_files := $(foreach var, $(touch_fw_list), atmel/$(var))
+fw-shipped-$(CONFIG_TOUCHSCREEN_ATMEL_S336) += $(touch_fw_files)
+
 ifdef CONFIG_ACENIC_OMIT_TIGON_I
 acenic-objs := acenic/tg2.bin
 fw-shipped- += acenic/tg1.bin
@@ -246,7 +250,7 @@ obj-$(CONFIG_FIRMWARE_IN_KERNEL) += $(patsubst %,%.gen.o, $(fw-shipped-y))
 
 # Remove .S files and binaries created from ihex
 # (during 'make clean' .config isn't included so they're all in $(fw-shipped-))
-targets := $(fw-shipped-) $(patsubst $(obj)/%,%, \
+targets := $(patsubst $(obj)/%,%, \
 				$(shell find $(obj) -name \*.gen.S 2>/dev/null))
 
 # Without this, built-in.o won't be created when it's empty, and the

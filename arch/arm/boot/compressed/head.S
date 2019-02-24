@@ -10,6 +10,7 @@
  */
 #include <linux/linkage.h>
 
+	.arch	armv7-a
 /*
  * Debugging stuff
  *
@@ -583,7 +584,7 @@ __setup_mmu:	sub	r3, r4, #16384		@ Page directory size
 		mov	r0, r3
 		mov	r9, r0, lsr #18
 		mov	r9, r9, lsl #18		@ start of RAM
-		add	r10, r9, #0x10000000	@ a reasonable RAM size
+		add	r10, r9, #0x3200000	@ a reasonable RAM size
 		mov	r1, #0x12		@ XN|U + section mapping
 		orr	r1, r1, #3 << 10	@ AP=11
 		add	r2, r3, #16384
@@ -613,6 +614,15 @@ __setup_mmu:	sub	r3, r4, #16384		@ Page directory size
 		str	r1, [r0]
 		mov	pc, lr
 ENDPROC(__setup_mmu)
+
+@ Enable unaligned access on v6, to allow better code generation
+@ for the decompressor C code:
+__armv6_mmu_cache_on:
+		mrc	p15, 0, r0, c1, c0, 0	@ read SCTLR
+		bic	r0, r0, #2		@ A (no unaligned access fault)
+		orr	r0, r0, #1 << 22	@ U (v6 unaligned access model)
+		mcr	p15, 0, r0, c1, c0, 0	@ write SCTLR
+		b	__armv4_mmu_cache_on
 
 __arm926ejs_mmu_cache_on:
 #ifdef CONFIG_CPU_DCACHE_WRITETHROUGH
@@ -655,6 +665,9 @@ __armv7_mmu_cache_on:
 		mrc	p15, 0, r0, c1, c0, 0	@ read control reg
 		orr	r0, r0, #0x5000		@ I-cache enable, RR cache replacement
 		orr	r0, r0, #0x003c		@ write buffer
+		bic r0, r0, #2			@ A (no unaligned access fault)
+		orr r0, r0, #1 << 22	@ U (v6 unaligned access model)
+								@ (needed for ARM1176)
 #ifdef CONFIG_MMU
 #ifdef CONFIG_CPU_ENDIAN_BE8
 		orr	r0, r0, #1 << 25	@ big-endian page tables
@@ -895,7 +908,7 @@ proc_types:
 
 		.word	0x0007b000		@ ARMv6
 		.word	0x000ff000
-		W(b)	__armv4_mmu_cache_on
+		W(b)	__armv6_mmu_cache_on
 		W(b)	__armv4_mmu_cache_off
 		W(b)	__armv6_mmu_cache_flush
 

@@ -260,12 +260,15 @@ struct audio_dev {
 	s64				frames_sent;
 
 	bool				audio_ep_enabled;
+	bool				triggered;
 };
 
 static inline struct audio_dev *func_to_audio_source(struct usb_function *f)
 {
 	return container_of(f, struct audio_dev, func);
 }
+
+static void audio_pcm_playback_start(struct audio_dev *audio);
 
 /*-------------------------------------------------------------------------*/
 
@@ -566,6 +569,10 @@ static int audio_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
 				return ret;
 			}
 			audio->audio_ep_enabled = true;
+			if (audio->triggered) {
+				// resume playing if we are still triggered
+				audio_pcm_playback_start(audio);
+			}
 		} else if (!alt && audio->audio_ep_enabled) {
 			usb_ep_disable(audio->in_ep);
 			audio->audio_ep_enabled = false;
@@ -659,15 +666,18 @@ audio_unbind(struct usb_configuration *c, struct usb_function *f)
 {
 	struct audio_dev *audio = func_to_audio_source(f);
 	struct usb_request *req;
+	unsigned long flags;
 
 	while ((req = audio_req_get(audio)))
 		audio_request_free(req, audio->in_ep);
 
 	snd_card_free_when_closed(audio->card);
+	spin_lock_irqsave(&audio->lock,flags);
 	audio->card = NULL;
 	audio->pcm = NULL;
 	audio->substream = NULL;
 	audio->in_ep = NULL;
+	spin_unlock_irqrestore(&audio->lock,flags);
 }
 
 static void audio_pcm_playback_start(struct audio_dev *audio)
@@ -692,13 +702,16 @@ static int audio_pcm_open(struct snd_pcm_substream *substream)
 {
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct audio_dev *audio = substream->private_data;
+	unsigned long flags;
 
 	runtime->private_data = audio;
 	runtime->hw = audio_hw_info;
 	snd_pcm_limit_hw_rates(runtime);
 	runtime->hw.channels_max = 2;
 
+	spin_lock_irqsave(&audio->lock,flags);
 	audio->substream = substream;
+	spin_unlock_irqrestore(&audio->lock,flags);
 	return 0;
 }
 
@@ -787,11 +800,13 @@ static int audio_pcm_playback_trigger(struct snd_pcm_substream *substream,
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
 	case SNDRV_PCM_TRIGGER_RESUME:
+		audio->triggered = 1;
 		audio_pcm_playback_start(audio);
 		break;
 
 	case SNDRV_PCM_TRIGGER_STOP:
 	case SNDRV_PCM_TRIGGER_SUSPEND:
+		audio->triggered = 0;
 		audio_pcm_playback_stop(audio);
 		break;
 

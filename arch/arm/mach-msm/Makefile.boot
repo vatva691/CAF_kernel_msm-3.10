@@ -46,6 +46,8 @@ endif
    zreladdr-$(CONFIG_ARCH_APQ8064)	:= 0x80208000
 
 # MSM8974
+ifeq ($(CONFIG_MACH_LGE),y)
+else
    zreladdr-$(CONFIG_ARCH_MSM8974)	:= 0x00008000
         dtb-$(CONFIG_ARCH_MSM8974)	+= msm8974-v1-cdp.dtb
         dtb-$(CONFIG_ARCH_MSM8974)	+= msm8974-v1-fluid.dtb
@@ -76,6 +78,7 @@ endif
         dtb-$(CONFIG_ARCH_MSM8974)	+= msm8974pro-ac-pm8941-liquid.dtb
         dtb-$(CONFIG_ARCH_MSM8974)	+= msm8974pro-ac-pm8941-mtp.dtb
         dtb-$(CONFIG_ARCH_MSM8974)	+= msm8974pro-ac-pma8084-pm8941-mtp.dtb
+endif
 
 # APQ8084
    zreladdr-$(CONFIG_ARCH_APQ8084)	:= 0x00008000
@@ -100,6 +103,17 @@ endif
 
 # MSM8226
    zreladdr-$(CONFIG_ARCH_MSM8226)	:= 0x00008000
+ifeq ($(CONFIG_MACH_LGE),y)
+	dtb-$(CONFIG_MACH_MSM8226_W7DS_GLOBAL_COM)    +=  msm8226-w7ds_global_com-v1.dtb \
+							  msm8226-w7ds_global_com-v2.dtb
+	dtb-$(CONFIG_MACH_MSM8926_JAGNM_GLOBAL_COM)   +=  msm8226-v1-jagnm.dtb \
+							  msm8226-v2-jagnm.dtb
+	dtb-$(CONFIG_MACH_MSM8226_JAG3GDS_GLOBAL_COM) +=  msm8226-jag3gds.dtb
+
+	dtb-$(CONFIG_MACH_MSM8926_G2M_GLOBAL)	      +=  msm8226-g2mds.dtb \
+						          msm8226-v1-g2m.dtb \
+						          msm8226-v2-g2m.dtb
+else # not CONFIG_MACH_LGE
 	dtb-$(CONFIG_ARCH_MSM8226)	+= msm8226-sim.dtb
 	dtb-$(CONFIG_ARCH_MSM8226)	+= msm8226-fluid.dtb
 	dtb-$(CONFIG_ARCH_MSM8226)	+= msm8226-v1-cdp.dtb
@@ -138,6 +152,7 @@ endif
 	dtb-$(CONFIG_ARCH_MSM8226)	+= apq8026-v2-1080p-cdp.dtb
 	dtb-$(CONFIG_ARCH_MSM8226)	+= apq8026-v2-720p-mtp.dtb
 	dtb-$(CONFIG_ARCH_MSM8226)	+= apq8026-v2-1080p-mtp.dtb
+endif # not CONFIG_MACH_LGE
 
 # FSM9XXX
    zreladdr-$(CONFIG_ARCH_FSM9XXX)	:= 0x10008000
@@ -154,6 +169,14 @@ initrd_phys-$(CONFIG_ARCH_FSM9XXX)	:= 0x12000000
 
 # MSM8610
    zreladdr-$(CONFIG_ARCH_MSM8610)	:= 0x00008000
+ifeq ($(CONFIG_MACH_LGE),y)
+	dtb-$(CONFIG_MACH_MSM8X10_W5N_GLOBAL_COM)   +=   msm8610-v1-w5n.dtb \
+							 msm8610-v2-w5n.dtb
+	dtb-$(CONFIG_MACH_MSM8X10_W3DS_GLOBAL_COM)   +=  msm8610-v1-w3ds.dtb \
+							 msm8610-v2-w3ds.dtb
+	dtb-$(CONFIG_MACH_MSM8X10_W55DS_GLOBAL_COM)   +=  msm8610-v1-w55ds.dtb \
+							  msm8610-v2-w55ds.dtb
+else # not CONFIG_MACH_LGE
         dtb-$(CONFIG_ARCH_MSM8610)	+= msm8610-v1-cdp.dtb
         dtb-$(CONFIG_ARCH_MSM8610)	+= msm8610-v2-cdp.dtb
         dtb-$(CONFIG_ARCH_MSM8610)	+= msm8610-v1-mtp.dtb
@@ -164,6 +187,7 @@ initrd_phys-$(CONFIG_ARCH_FSM9XXX)	:= 0x12000000
         dtb-$(CONFIG_ARCH_MSM8610)	+= msm8610-v1-qrd-skuab.dtb
         dtb-$(CONFIG_ARCH_MSM8610)	+= msm8610-v2-qrd-skuaa.dtb
         dtb-$(CONFIG_ARCH_MSM8610)	+= msm8610-v2-qrd-skuab.dtb
+endif # not CONFIG_MACH_LGE
 
 # MSMSAMARIUM
    zreladdr-$(CONFIG_ARCH_MSMSAMARIUM)	:= 0x00008000
