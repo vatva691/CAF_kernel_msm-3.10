@@ -29,15 +29,10 @@
 
 #define MSM_FB_ENABLE_DBGFS
 #define WAIT_FENCE_FIRST_TIMEOUT (3 * MSEC_PER_SEC)
-#define WAIT_FENCE_FINAL_TIMEOUT (7 * MSEC_PER_SEC)
-#define WAIT_MAX_FENCE_TIMEOUT (WAIT_FENCE_FIRST_TIMEOUT + \
-					WAIT_FENCE_FINAL_TIMEOUT)
-#define WAIT_MIN_FENCE_TIMEOUT  (1)
-/* Display op timeout should be greater than the total timeout but not
- * unreasonably large. Set to 1s more than first wait + final wait which
- * are already quite long and proceed without any further waits. */
-#define WAIT_DISP_OP_TIMEOUT (WAIT_FENCE_FIRST_TIMEOUT + \
-		WAIT_FENCE_FINAL_TIMEOUT + 1)
+#define WAIT_FENCE_FINAL_TIMEOUT (10 * MSEC_PER_SEC)
+/* Display op timeout should be greater than total timeout */
+#define WAIT_DISP_OP_TIMEOUT ((WAIT_FENCE_FIRST_TIMEOUT + \
+		WAIT_FENCE_FINAL_TIMEOUT) * MDP_MAX_FENCE_FD)
 
 #ifndef MAX
 #define  MAX(x, y) (((x) > (y)) ? (x) : (y))
@@ -46,6 +41,9 @@
 #ifndef MIN
 #define  MIN(x, y) (((x) < (y)) ? (x) : (y))
 #endif
+
+#define MDP_PP_AD_BL_LINEAR	0x0
+#define MDP_PP_AD_BL_LINEAR_INV	0x1
 
 /**
  * enum mdp_notify_event - Different frame events to indicate frame update state
@@ -86,6 +84,7 @@ struct disp_info_notify {
 	int value;
 	int is_suspend;
 	int ref_count;
+	bool init_done;
 };
 
 struct msm_sync_pt_data {
@@ -124,17 +123,11 @@ struct msm_mdp_interface {
 	void (*dma_fnc)(struct msm_fb_data_type *mfd);
 	int (*cursor_update)(struct msm_fb_data_type *mfd,
 				struct fb_cursor *cursor);
-#ifdef CONFIG_LCD_KCAL
-	int (*lut_update)(struct msm_fb_data_type *mfd, struct fb_cmap *cmap,
-				bool setup_hw);
-#else
 	int (*lut_update)(struct msm_fb_data_type *mfd, struct fb_cmap *cmap);
-#endif
 	int (*do_histogram)(struct msm_fb_data_type *mfd,
 				struct mdp_histogram *hist);
-	int (*update_ad_input)(struct msm_fb_data_type *mfd);
-	int (*ad_attenuate_bl)(u32 bl, u32 *bl_out,
-			struct msm_fb_data_type *mfd);
+	int (*ad_calc_bl)(struct msm_fb_data_type *mfd, int bl_in,
+		int *bl_out, bool *bl_out_notify);
 	int (*panel_register_done)(struct mdss_panel_data *pdata);
 	u32 (*fb_stride)(u32 fb_index, u32 xres, int bpp);
 	int (*splash_init_fnc)(struct msm_fb_data_type *mfd);
@@ -197,6 +190,7 @@ struct msm_fb_data_type {
 	int ext_ad_ctrl;
 	u32 ext_bl_ctrl;
 	u32 calib_mode;
+	u32 ad_bl_level;
 	u32 bl_level;
 	u32 bl_scale;
 	u32 bl_min_lvl;

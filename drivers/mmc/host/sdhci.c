@@ -518,7 +518,7 @@ static int sdhci_pre_dma_transfer(struct sdhci_host *host,
 
 	if (!next && data->host_cookie &&
 	    data->host_cookie != host->next_data.cookie) {
-		pr_warning("[%s] invalid cookie: data->host_cookie %d"
+		printk(KERN_WARNING "[%s] invalid cookie: data->host_cookie %d"
 		       " host->next_data.cookie %d\n",
 		       __func__, data->host_cookie, host->next_data.cookie);
 		data->host_cookie = 0;
@@ -2090,12 +2090,12 @@ static int sdhci_execute_tuning(struct mmc_host *mmc, u32 opcode)
 	unsigned long timeout;
 	int err = 0;
 	bool requires_tuning_nonuhs = false;
-	unsigned long flags;
 
 	host = mmc_priv(mmc);
 
 	sdhci_runtime_pm_get(host);
-	spin_lock_irqsave(&host->lock, flags);
+	disable_irq(host->irq);
+	spin_lock(&host->lock);
 
 	ctrl = sdhci_readw(host, SDHCI_HOST_CONTROL2);
 
@@ -2116,15 +2116,18 @@ static int sdhci_execute_tuning(struct mmc_host *mmc, u32 opcode)
 	    requires_tuning_nonuhs)
 		ctrl |= SDHCI_CTRL_EXEC_TUNING;
 	else {
-		spin_unlock_irqrestore(&host->lock, flags);
+		spin_unlock(&host->lock);
+		enable_irq(host->irq);
 		sdhci_runtime_pm_put(host);
 		return 0;
 	}
 
 	if (host->ops->execute_tuning) {
-		spin_unlock_irqrestore(&host->lock, flags);
+		spin_unlock(&host->lock);
+		enable_irq(host->irq);
 		err = host->ops->execute_tuning(host, opcode);
-		spin_lock_irqsave(&host->lock, flags);
+		disable_irq(host->irq);
+		spin_lock(&host->lock);
 		goto out;
 	}
 	sdhci_writew(host, ctrl, SDHCI_HOST_CONTROL2);
@@ -2195,13 +2198,15 @@ static int sdhci_execute_tuning(struct mmc_host *mmc, u32 opcode)
 		host->cmd = NULL;
 		host->mrq = NULL;
 
-		spin_unlock_irqrestore(&host->lock, flags);
+		spin_unlock(&host->lock);
+		enable_irq(host->irq);
 
 		/* Wait for Buffer Read Ready interrupt */
 		wait_event_interruptible_timeout(host->buf_ready_int,
 					(host->tuning_done == 1),
 					msecs_to_jiffies(50));
-		spin_lock_irqsave(&host->lock, flags);
+		disable_irq(host->irq);
+		spin_lock(&host->lock);
 
 		if (!host->tuning_done) {
 			pr_info(DRIVER_NAME ": Timeout waiting for "
@@ -2274,7 +2279,8 @@ out:
 		err = 0;
 
 	sdhci_clear_set_irqs(host, SDHCI_INT_DATA_AVAIL, ier);
-	spin_unlock_irqrestore(&host->lock, flags);
+	spin_unlock(&host->lock);
+	enable_irq(host->irq);
 	sdhci_runtime_pm_put(host);
 
 	return err;
@@ -2547,90 +2553,6 @@ static void sdhci_tuning_timer(unsigned long data)
 	spin_unlock_irqrestore(&host->lock, flags);
 }
 
-#ifdef CONFIG_LGE_ENABLE_MMC_STRENGTH_CONTROL
-static int lge_asctodec(char *buff, int num)
-{
-    int i, j;
-    int val, tmp;
-    val=0;
-    for(i=0; i<num; i++)
-    {
-        tmp = 1;
-        for(j=0; j< (num-(i+1)); j++){
-            tmp = tmp*10;
-        }   
-        val += tmp*(buff[i]-48); 
-    }
-    pr_info("[JWKIM_TEST] dec :%d\n", val);
-    return val;
-}
-
-static void record_crc_error(char *filename)
-{
-    struct file *filp;
-    char bufs[10], asc_num[10];
-    int ret;
-    int count;
-    int num_crc;
-    int tmp;
-    int i;
-
-    mm_segment_t old_fs = get_fs();
-    set_fs(KERNEL_DS);
-
-    filp = filp_open(filename, O_RDWR, S_IRUSR|S_IWUSR);
-    if(IS_ERR(filp)){
-        pr_err("[JWKIM_TEST] open error : %ld\n", IS_ERR(filp));
-        return;
-    }
-    count = 0;
-
-    do{
-        ret = vfs_read(filp, &bufs[count], 1, &filp->f_pos);
-        count++;
-    }while(ret!=0);
-    count--;
-    bufs[count]=0;
-    num_crc = lge_asctodec(bufs, count);
-    num_crc = num_crc+1;
-    count = 1;
-    tmp = num_crc;
-    do{
-        tmp = tmp/10;
-        if(!(tmp<1))
-            count++;
-        else
-            break;
-    }while(1);  
-
-
-    for(i=0; i<count; i++){
-        tmp = num_crc%10;
-        asc_num[count-(i+1)] = tmp + '0';
-        num_crc = num_crc/10;
-    }
-    asc_num[count]=0;
-    pr_info("[JWKIM_TEST] ascii val : %s\n", asc_num);
-    
-    filp->f_pos=0;
-
-    vfs_write(filp, asc_num, count, &filp->f_pos);
-    filp_close(filp, NULL);
-    set_fs(old_fs);
-    return;
-}
-
-static void record_crc_data_error(struct work_struct *work)
-{
-	pr_info("[JWKIM_TEST] DATA CRC Occured!!!\n");
-	record_crc_error("/data/data/com.lge.fsbench/files/data_crc_error.txt");
-}
-
-static DECLARE_WORK(lge_crc_data_workqueue, record_crc_data_error);
-
-
-#endif
-
 /*****************************************************************************\
  *                                                                           *
  * Interrupt handling                                                        *
@@ -2795,19 +2717,10 @@ static void sdhci_data_irq(struct sdhci_host *host, u32 intmask)
 							    SDHCI_COMMAND));
 			if ((command != MMC_SEND_TUNING_BLOCK_HS400) &&
 			    (command != MMC_SEND_TUNING_BLOCK_HS200) &&
-			    (command != MMC_SEND_TUNING_BLOCK))
-			{
+			    (command != MMC_SEND_TUNING_BLOCK)) {
 				pr_msg = true;
-#ifdef CONFIG_LGE_ENABLE_MMC_STRENGTH_CONTROL
-				if(intmask & SDHCI_INT_DATA_CRC){
-					pr_err("%s : [CRC] Data CRC occured!!!! \n", mmc_hostname(host->mmc));
-					pr_err("intmask : 0x%08X \n", intmask);					
-					queue_work(system_nrt_wq, &lge_crc_data_workqueue);
-				}
-#else
 				if (intmask & SDHCI_INT_DATA_CRC)
 					host->flags |= SDHCI_NEEDS_RETUNING;
-#endif
 			}
 		} else {
 			pr_msg = true;
@@ -3017,8 +2930,6 @@ int sdhci_suspend_host(struct sdhci_host *host)
 	int ret;
 	bool has_tuning_timer;
 
-	pr_debug("%s: Enter %s\n", mmc_hostname(host->mmc), __func__);
-
 	if (host->ops->platform_suspend)
 		host->ops->platform_suspend(host);
 
@@ -3055,8 +2966,6 @@ EXPORT_SYMBOL_GPL(sdhci_suspend_host);
 int sdhci_resume_host(struct sdhci_host *host)
 {
 	int ret;
-
-	pr_debug("%s: Enter %s\n", mmc_hostname(host->mmc), __func__);
 
 	if (host->flags & (SDHCI_USE_SDMA | SDHCI_USE_ADMA)) {
 		if (host->ops->enable_dma)
@@ -3133,8 +3042,6 @@ int sdhci_runtime_suspend_host(struct sdhci_host *host)
 	unsigned long flags;
 	int ret = 0;
 
-	pr_debug("%s: Enter %s\n", mmc_hostname(host->mmc), __func__);
-
 	/* Disable tuning since we are suspending */
 	if (host->version >= SDHCI_SPEC_300 &&
 	    host->tuning_mode == SDHCI_TUNING_MODE_1) {
@@ -3160,8 +3067,6 @@ int sdhci_runtime_resume_host(struct sdhci_host *host)
 {
 	unsigned long flags;
 	int ret = 0, host_flags = host->flags;
-
-	pr_debug("%s: Enter %s\n", mmc_hostname(host->mmc), __func__);
 
 	if (host_flags & (SDHCI_USE_SDMA | SDHCI_USE_ADMA)) {
 		if (host->ops->enable_dma)

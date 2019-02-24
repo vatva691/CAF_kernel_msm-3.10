@@ -352,11 +352,7 @@ static void adreno_input_disconnect(struct input_handle *handle)
 static const struct input_device_id adreno_input_ids[] = {
 	{
 		.flags = INPUT_DEVICE_ID_MATCH_EVBIT,
-#if defined(CONFIG_FB_MSM_MIPI_LGD_VIDEO_WVGA_PT_INCELL_PANEL)
-		.evbit = { BIT_MASK(EV_REL) },
-#else /* QCT Original */
 		.evbit = { BIT_MASK(EV_ABS) },
-#endif
 		/* assumption: MT_.._X & MT_.._Y are in the same long */
 		.absbit = { [BIT_WORD(ABS_MT_POSITION_X)] =
 				BIT_MASK(ABS_MT_POSITION_X) |
@@ -2544,7 +2540,7 @@ static ssize_t _ft_hang_intr_status_store(struct device *dev,
 				struct device_attribute *attr,
 				const char *buf, size_t count)
 {
-	unsigned int new_setting = 0, old_setting;
+	unsigned int new_setting, old_setting;
 	struct kgsl_device *device = kgsl_device_from_dev(dev);
 	struct adreno_device *adreno_dev;
 	int ret;
@@ -3330,6 +3326,8 @@ static unsigned int adreno_readtimestamp(struct kgsl_device *device,
 		break;
 	}
 
+	rmb();
+
 	return timestamp;
 }
 
@@ -3418,13 +3416,6 @@ static inline s64 adreno_ticks_to_us(u32 ticks, u32 freq)
 	return ticks / freq;
 }
 
-/**
- * adreno_power_stats() - Reads the counters needed for freq decisions
- * @device: Pointer to device whose counters are read
- * @stats: Pointer to stats set that needs updating
- * Power: The caller is expected to be in a clock enabled state as this
- * function does reg reads
- */
 static void adreno_power_stats(struct kgsl_device *device,
 				struct kgsl_power_stats *stats)
 {
@@ -3433,6 +3424,14 @@ static void adreno_power_stats(struct kgsl_device *device,
 	struct adreno_busy_data busy_data;
 
 	memset(stats, 0, sizeof(*stats));
+
+	/*
+	 * If we're not currently active, there shouldn't have been
+	 * any cycles since the last time this function was called.
+	 */
+
+	if (device->state != KGSL_STATE_ACTIVE)
+		return;
 
 	/* Get the busy cycles counted since the counter was last reset */
 	adreno_dev->gpudev->busy_cycles(adreno_dev, &busy_data);

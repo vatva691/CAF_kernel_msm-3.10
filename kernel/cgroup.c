@@ -3958,23 +3958,23 @@ static int cgroup_clear_css_refs(struct cgroup *cgrp)
 	return !failed;
 }
 
-/* Checks if all of the css_sets attached to a cgroup have a refcount of 0. */
+/* checks if all of the css_sets attached to a cgroup have a refcount of 0.
+ * Must be called with css_set_lock held */
 static int cgroup_css_sets_empty(struct cgroup *cgrp)
 {
 	struct cg_cgroup_link *link;
-	int retval = 1;
 
 	read_lock(&css_set_lock);
 	list_for_each_entry(link, &cgrp->css_sets, cgrp_link_list) {
 		struct css_set *cg = link->cg;
-		if (cg && atomic_read(&cg->refcount) > 0) {
-			retval = 0;
-			break;
+		if (cg && (atomic_read(&cg->refcount) > 0)) {
+			read_unlock(&css_set_lock);
+			return 0;
 		}
 	}
-	read_unlock(&css_set_lock);
 
-	return retval;
+	read_unlock(&css_set_lock);
+	return 1;
 }
 
 static int cgroup_rmdir(struct inode *unused_dir, struct dentry *dentry)
@@ -5223,7 +5223,7 @@ static int cgroup_css_links_read(struct cgroup *cont,
 		struct css_set *cg = link->cg;
 		struct task_struct *task;
 		int count = 0;
-		seq_printf(seq, "css_set %pK\n", cg);
+		seq_printf(seq, "css_set %p\n", cg);
 		list_for_each_entry(task, &cg->tasks, cg_list) {
 			if (count++ > MAX_TASKS_SHOWN_PER_CSS) {
 				seq_puts(seq, "  ...\n");

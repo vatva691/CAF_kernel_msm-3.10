@@ -27,10 +27,6 @@
 #include <linux/hrtimer.h>
 #include <linux/power_supply.h>
 #include <linux/cdev.h>
-#ifdef CONFIG_LGE_PM_USB_ID
-#include <linux/qpnp/qpnp-adc.h>
-#endif
-
 /*
  * The following are bit fields describing the usb_request.udc_priv word.
  * These bit fields are set by function drivers that wish to queue
@@ -107,8 +103,6 @@ enum msm_usb_phy_type {
 };
 
 #define IDEV_CHG_MAX	1500
-#define IDEV_CHG_CDP	900
-#define IDEV_CHG_DCP	800
 #define IDEV_CHG_MIN	500
 #define IUNIT		100
 
@@ -196,11 +190,6 @@ enum usb_vdd_value {
 	VDD_VAL_MAX,
 };
 
-enum msm_otg_id_state {
-        MSM_OTG_ID_GROUND = 0,
-        MSM_OTG_ID_FLOAT,
-};
-
 /**
  * Maintain state for hvdcp external charger status
  * DEFAULT	This is used when DCP is detected
@@ -219,8 +208,6 @@ enum usb_ext_chg_status {
  * struct msm_otg_platform_data - platform device data
  *              for msm_otg driver.
  * @phy_init_seq: PHY configuration sequence. val, reg pairs
- *              terminated by -1.
- * @phy_init_host_seq :PHY configuration sequence for Host mode. val, reg pairs
  *              terminated by -1.
  * @vbus_power: VBUS power on/off routine.It should return result
  *		as success(zero value) or failure(non-zero value).
@@ -264,7 +251,6 @@ enum usb_ext_chg_status {
  */
 struct msm_otg_platform_data {
 	int *phy_init_seq;
-	int *phy_init_host_seq;
 	int (*vbus_power)(bool on);
 	unsigned power_budget;
 	enum usb_mode_type mode;
@@ -292,11 +278,6 @@ struct msm_otg_platform_data {
 	bool dpdm_pulldown_added;
 	bool enable_ahb2ahb_bypass;
 	bool disable_retention_with_vdd_min;
-	bool factory_cable_reset;
-#ifdef CONFIG_LGE_SUPPORT_TYPE_A_USB
-	int hub_en_gpio;
-	int hub_res_gpio;
-#endif
 };
 
 /* phy related flags */
@@ -355,7 +336,6 @@ struct msm_otg_platform_data {
  * @sleep_clk: clock struct of sleep_clk for USB PHY.
  * @core_clk_rate: core clk max frequency
  * @regs: ioremapped register base address.
- * @usb_phy_ctrl_reg: relevant PHY_CTRL_REG register base address.
  * @inputs: OTG state machine inputs(Id, SessValid etc).
  * @sm_work: OTG state machine work.
  * @pm_suspended: OTG device is system(PM) suspended.
@@ -383,7 +363,6 @@ struct msm_otg_platform_data {
  * @host_bus_suspend: indicates host bus suspend or not.
  * @chg_check_timer: The timer used to implement the workaround to detect
  *               very slow plug in of wall charger.
- * @pm_done: Indicates whether USB is PM resumed.
  * @ui_enabled: USB Intterupt is enabled or disabled.
  * @pm_done: It is used to increment the pm counter using pm_runtime_get_sync.
 	     This handles the race case when PM resume thread returns before
@@ -403,7 +382,6 @@ struct msm_otg {
 	long core_clk_rate;
 	struct resource *io_res;
 	void __iomem *regs;
-	void __iomem *usb_phy_ctrl_reg;
 #define ID		0
 #define B_SESS_VLD	1
 #define ID_A		2
@@ -434,10 +412,6 @@ struct msm_otg {
 	struct delayed_work chg_work;
 	struct delayed_work pmic_id_status_work;
 	struct delayed_work suspend_work;
-#if defined(CONFIG_CHG_DETECTOR_MAX14656)
-	struct delayed_work lge_chg_work;
-	int chg_det_cnt;
-#endif
 	enum usb_chg_state chg_state;
 	enum usb_chg_type chg_type;
 	unsigned dcd_time;
@@ -512,21 +486,7 @@ struct msm_otg {
 	struct completion ext_chg_wait;
 	int ui_enabled;
 	bool pm_done;
-#ifdef CONFIG_LGE_PM_USB_ID
-	struct qpnp_vadc_chip *vadc_dev;
-	struct qpnp_adc_tm_btm_param adc_param;
-	struct delayed_work init_adc_work;
-	enum msm_otg_id_state id_state;
-	struct qpnp_adc_tm_chip *adc_tm_dev;
-	bool id_adc_detect;
-#else
 	struct qpnp_vadc_chip	*vadc_dev;
-#endif
-#ifdef CONFIG_LGE_PM_VZW_FAST_CHG
-	int chg_det_count;
-#endif
-	struct power_supply *ac_psy;
-
 };
 
 struct ci13xxx_platform_data {

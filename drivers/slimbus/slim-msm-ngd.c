@@ -668,7 +668,6 @@ static int ngd_user_msg(struct slim_controller *ctrl, u8 la, u8 mt, u8 mc,
 	return ngd_xfer_msg(ctrl, &txn);
 }
 
-static int lg_cnt = 0;
 static int ngd_xferandwait_ack(struct slim_controller *ctrl,
 				struct slim_msg_txn *txn)
 {
@@ -677,22 +676,16 @@ static int ngd_xferandwait_ack(struct slim_controller *ctrl,
 	if (!ret) {
 		int timeout;
 		timeout = wait_for_completion_timeout(txn->comp, HZ);
-		if (!timeout){
+		if (!timeout)
 			ret = -ETIMEDOUT;
-			lg_cnt++ ;
-		}
-		else{
+		else
 			ret = txn->ec;
-			lg_cnt =0 ;
-		}
 	}
 
 	if (ret) {
 		if (ret != -EREMOTEIO || txn->mc != SLIM_USR_MC_CHAN_CTRL)
 			SLIM_ERR(dev, "master msg:0x%x,tid:%d ret:%d\n",
 				txn->mc, txn->tid, ret);
-		if(lg_cnt>3)
-			panic("ngd_panic.4_ps2");
 		mutex_lock(&ctrl->m_ctrl);
 		ctrl->txnt[txn->tid] = NULL;
 		mutex_unlock(&ctrl->m_ctrl);
@@ -1273,13 +1266,11 @@ static void ngd_adsp_down(struct work_struct *work)
 	struct slim_controller *ctrl = &dev->ctrl;
 	struct slim_device *sbdev;
 
-	mutex_lock(&dev->ssr_lock);
 	ngd_slim_enable(dev, false);
 	/* device up should be called again after SSR */
 	list_for_each_entry(sbdev, &ctrl->devs, dev_list)
 		slim_report_absent(sbdev);
 	SLIM_INFO(dev, "SLIM ADSP SSR (DOWN) done\n");
-	mutex_unlock(&dev->ssr_lock);
 }
 
 static void ngd_adsp_up(struct work_struct *work)
@@ -1288,9 +1279,7 @@ static void ngd_adsp_up(struct work_struct *work)
 		container_of(work, struct msm_slim_qmi, ssr_up);
 	struct msm_slim_ctrl *dev =
 		container_of(qmi, struct msm_slim_ctrl, qmi);
-	mutex_lock(&dev->ssr_lock);
 	ngd_slim_enable(dev, true);
-	mutex_unlock(&dev->ssr_lock);
 }
 
 static ssize_t show_mask(struct device *device, struct device_attribute *attr,
@@ -1443,7 +1432,6 @@ static int __devinit ngd_slim_probe(struct platform_device *pdev)
 	init_completion(&dev->reconf);
 	init_completion(&dev->ctrl_up);
 	mutex_init(&dev->tx_lock);
-	mutex_init(&dev->ssr_lock);
 	mutex_init(&dev->tx_buf_lock);
 	spin_lock_init(&dev->rx_lock);
 	dev->ee = 1;

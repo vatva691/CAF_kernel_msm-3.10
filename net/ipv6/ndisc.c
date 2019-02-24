@@ -1266,14 +1266,7 @@ static void ndisc_router_discovery(struct sk_buff *skb)
 	if (rt)
 		rt6_set_expires(rt, jiffies + (HZ * lifetime));
 	if (ra_msg->icmph.icmp6_hop_limit) {
-		/* Only set hop_limit on the interface if it is higher than
-		 * the current hop_limit.
-		 */
-		if (in6_dev->cnf.hop_limit < ra_msg->icmph.icmp6_hop_limit) {
-			in6_dev->cnf.hop_limit = ra_msg->icmph.icmp6_hop_limit;
-		} else {
-			ND_PRINTK2(KERN_WARNING "RA: Got route advertisement with lower hop_limit than current\n");
-		}
+		in6_dev->cnf.hop_limit = ra_msg->icmph.icmp6_hop_limit;
 		if (rt)
 			dst_metric_set(&rt->dst, RTAX_HOPLIMIT,
 				       ra_msg->icmph.icmp6_hop_limit);
@@ -1386,7 +1379,7 @@ skip_routeinfo:
 		}
 	}
 
-	if (ndopts.nd_opts_mtu && in6_dev->cnf.accept_ra_mtu) {
+	if (ndopts.nd_opts_mtu) {
 		__be32 n;
 		u32 mtu;
 
@@ -1407,30 +1400,12 @@ skip_routeinfo:
 		}
 	}
 
-#ifdef CONFIG_LGE_DHCPV6_WIFI
-	if (in6_dev->if_flags & IF_RA_OTHERCONF){
-		printk(KERN_INFO "receive RA with o bit!\n");
-		in6_dev->cnf.ra_info_flag = 1;
-	} 
-	if(in6_dev->if_flags & IF_RA_MANAGED){
-		printk(KERN_INFO "receive RA with m bit!\n");
-		in6_dev->cnf.ra_info_flag = 2;
-	}
-#endif
 	if (ndopts.nd_useropts) {
 		struct nd_opt_hdr *p;
 		for (p = ndopts.nd_useropts;
 		     p;
 		     p = ndisc_next_useropt(p, ndopts.nd_useropts_end)) {
 			ndisc_ra_useropt(skb, p);
-#ifdef CONFIG_LGE_DHCPV6_WIFI
-			/* only clear ra_info_flag when O bit is set */
-			if (p->nd_opt_type == ND_OPT_RDNSS &&
-					in6_dev->cnf.ra_info_flag == 1) {
-				printk(KERN_INFO "RDNSS, ignore RA with o bit!\n");
-				in6_dev->cnf.ra_info_flag = 0;
-			} 
-#endif
 		}
 	}
 
@@ -1761,11 +1736,11 @@ static int ndisc_netdev_event(struct notifier_block *this, unsigned long event, 
 	switch (event) {
 	case NETDEV_CHANGEADDR:
 		neigh_changeaddr(&nd_tbl, dev);
-		fib6_run_gc(0, net, false);
+		fib6_run_gc(~0UL, net);
 		break;
 	case NETDEV_DOWN:
 		neigh_ifdown(&nd_tbl, dev);
-		fib6_run_gc(0, net, false);
+		fib6_run_gc(~0UL, net);
 		break;
 	case NETDEV_NOTIFY_PEERS:
 		ndisc_send_unsol_na(dev);

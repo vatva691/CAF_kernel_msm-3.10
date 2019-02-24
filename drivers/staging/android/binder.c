@@ -3343,7 +3343,7 @@ static void print_binder_node(struct seq_file *m, struct binder_node *node)
 
 static void print_binder_ref(struct seq_file *m, struct binder_ref *ref)
 {
-	seq_printf(m, "  ref %d: desc %d %snode %d s %d w %d d %pK\n",
+	seq_printf(m, "  ref %d: desc %d %snode %d s %d w %d d %p\n",
 		   ref->debug_id, ref->desc, ref->node->proc ? "" : "dead ",
 		   ref->node->debug_id, ref->strong, ref->weak, ref->death);
 }
@@ -3590,25 +3590,13 @@ static int binder_transactions_show(struct seq_file *m, void *unused)
 
 static int binder_proc_show(struct seq_file *m, void *unused)
 {
-	struct binder_proc *itr;
 	struct binder_proc *proc = m->private;
-	struct hlist_node *pos;
 	int do_lock = !binder_debug_no_lock;
-	bool valid_proc = false;
 
 	if (do_lock)
 		mutex_lock(&binder_lock);
-
-	hlist_for_each_entry(itr, pos, &binder_procs, proc_node) {
-		if (itr == proc) {
-			valid_proc = true;
-			break;
-		}
-	}
-	if (valid_proc) {
-		seq_puts(m, "binder proc state:\n");
-		print_binder_proc(m, proc, 1);
-	}
+	seq_puts(m, "binder proc state:\n");
+	print_binder_proc(m, proc, 1);
 	if (do_lock)
 		mutex_unlock(&binder_lock);
 	return 0;
